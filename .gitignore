@@ -1,0 +1,16 @@
+# game data and build output — never commit
+*.bin
+*.cue
+*.iso
+*.img
+*.7z
+*.zip
+*.xdelta
+*.xdelta3
+*.xlsx
+*.SSC
+*.DAT
+*.GPX
+*.5[34]
+out/
+__pycache__/

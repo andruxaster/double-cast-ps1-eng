@@ -1,0 +1,91 @@
+diff --git a/frontend/libretro-version-script b/frontend/libretro-version-script
+index b0c262d..c448cc9 100644
+--- a/frontend/libretro-version-script
++++ b/frontend/libretro-version-script
+@@ -1,5 +1,5 @@
+ {
+-   global: retro_*;
++   global: retro_*; g_pctrace; g_pctrace_on; g_dmalog; g_dmalog_n; g_wlo; g_whi; g_rtrace; g_bp_pc; g_bp_hits; g_bp_regs;
+    local: *;
+ };
+ 
+diff --git a/libpcsxcore/cdrom.c b/libpcsxcore/cdrom.c
+index 11c435f..165e1df 100644
+--- a/libpcsxcore/cdrom.c
++++ b/libpcsxcore/cdrom.c
+@@ -1651,6 +1651,7 @@ void cdrWrite3(unsigned char rt) {
+ 		cdr.FifoOffset = DATA_SIZE; // fifo empty
+ }
+ 
++unsigned int g_dmalog[8192*3]; unsigned int g_dmalog_n;
+ void psxDma3(u32 madr, u32 bcr, u32 chcr) {
+ 	u32 cdsize, max_words, cycles;
+ 	int size;
+@@ -1689,6 +1690,11 @@ void psxDma3(u32 madr, u32 bcr, u32 chcr) {
+ 				size = max_words * 4;
+ 			if (size > 0)
+ 			{
++				if (g_dmalog_n < 8192) {
++					g_dmalog[g_dmalog_n*3] = (cdr.Transfer[0]<<16)|(cdr.Transfer[1]<<8)|cdr.Transfer[2];
++					g_dmalog[g_dmalog_n*3+1] = madr | (cdr.FifoOffset<<24);
++					g_dmalog[g_dmalog_n*3+2] = size; g_dmalog_n++;
++				}
+ 				memcpy(ptr, cdr.Transfer + cdr.FifoOffset, size);
+ 				cdr.FifoOffset += size;
+ 			}
+diff --git a/libpcsxcore/psxinterpreter.c b/libpcsxcore/psxinterpreter.c
+index 900c0cd..1fc1ced 100644
+--- a/libpcsxcore/psxinterpreter.c
++++ b/libpcsxcore/psxinterpreter.c
+@@ -659,6 +659,9 @@ OP(psxSYSCALL) {
+ 	intExceptionInsn(regs_, R3000E_Syscall << 2);
+ }
+ 
++unsigned int g_pctrace[0x80000];
++int g_pctrace_on;
++unsigned int g_bp_pc, g_bp_hits, g_bp_regs[34*64];
+ static inline void execI_(
+ 	u32 (INT_ATTR *fetch)(struct psxRegisters *r, const uintptr_t *luts, u32 pc),
+ 	const uintptr_t *memRLUT, psxRegisters *regs);
+@@ -1168,6 +1171,8 @@ static inline void execI_(
+ {
+ 	u32 pc = regs->pc;
+ 
++	if (g_pctrace_on) g_pctrace[(pc & 0x1fffff) >> 2]++;
++	if (g_bp_pc == pc && g_bp_hits < 64) { int k; for (k = 0; k < 32; k++) g_bp_regs[g_bp_hits*34+k] = regs->GPR.r[k]; g_bp_regs[g_bp_hits*34+32]=pc; g_bp_regs[g_bp_hits*34+33]=psxMemRead32(regs, regs->GPR.r[29]+0x138); g_bp_hits++; }
+ 	addCycle(regs);
+ 	dloadStep(regs);
+ 
+diff --git a/libpcsxcore/psxmem.c b/libpcsxcore/psxmem.c
+index a81dcaa..bf5f05c 100644
+--- a/libpcsxcore/psxmem.c
++++ b/libpcsxcore/psxmem.c
+@@ -353,9 +353,12 @@ void psxMemOnIsolate(int enable)
+ 			: R3000ACPU_NOTIFY_CACHE_UNISOLATED, NULL);
+ }
+ 
++unsigned int g_wlo, g_whi, g_rtrace[0x80000];
++#define WATCH(m) do { u32 a_=(m)&0x1fffff; if (g_whi && a_>=g_wlo && a_<g_whi) g_rtrace[((regs->pc-4)&0x1fffff)>>2]++; } while(0)
+ u8 psxMemRead8(psxRegisters *regs, u32 mem) {
+ 	u8 *p;
+ 	u32 t;
++	WATCH(mem);
+ 
+ 	if (likely(psxm_(&p, regs, mem, 0)))
+ 		return *p;
+@@ -373,6 +376,7 @@ u8 psxMemRead8(psxRegisters *regs, u32 mem) {
+ u16 psxMemRead16(psxRegisters *regs, u32 mem) {
+ 	u8 *p;
+ 	u32 t;
++	WATCH(mem);
+ 
+ 	if (likely(psxm_(&p, regs, mem, 0)))
+ 		return SWAPu16(*(u16 *)p);
+@@ -390,6 +394,7 @@ u16 psxMemRead16(psxRegisters *regs, u32 mem) {
+ u32 psxMemRead32(psxRegisters *regs, u32 mem) {
+ 	u8 *p;
+ 	u32 t;
++	WATCH(mem);
+ 
+ 	if (likely(psxm_(&p, regs, mem, 0)))
+ 		return SWAPu32(*(u32 *)p);
